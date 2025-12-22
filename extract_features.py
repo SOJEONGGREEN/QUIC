@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from collections import Counter
 
-WIN = 0.5  # seconds (non-overlap)
+WIN = 0.5  
 SEED = 42
 TARGET_PER_SCENARIO = 2000
 
@@ -31,16 +31,13 @@ def window_features(pkt_sizes, src_ports, ts_list):
     avg_len = float(sizes.mean())
     std_len = float(sizes.std())
 
-    # same_size_ratio: mode(size)/n
     size_counts = Counter(pkt_sizes)
     same_size_ratio = float(max(size_counts.values()) / n) if n > 0 else 0.0
 
-    # ports
     port_counts = Counter(src_ports)
     unique_src_port = int(len(port_counts))
     top_port_pkt = int(max(port_counts.values())) if port_counts else 0
 
-    # IAT in ms inside window
     if len(ts_list) >= 2:
         iats = np.diff(np.array(ts_list, dtype=np.float64)) * 1000.0
         iat_mean = float(iats.mean()) if len(iats) else 0.0
@@ -70,7 +67,6 @@ def extract_windows_from_pcap(pcap_path):
     reader = PcapReader(pcap_path)
     first_pkt = None
 
-    # Find first UDP packet time (or first packet time)
     for pkt in reader:
         first_pkt = pkt
         break
@@ -79,11 +75,9 @@ def extract_windows_from_pcap(pcap_path):
         return rows
 
     t0 = float(first_pkt.time)
-    # rewind not supported -> start processing including first_pkt
     reader.close()
     reader = PcapReader(pcap_path)
 
-    # current window
     w_idx = 0
     w_start = t0
     w_end = w_start + WIN
@@ -100,7 +94,6 @@ def extract_windows_from_pcap(pcap_path):
     for pkt in reader:
         t = float(pkt.time)
 
-        # advance windows until pkt fits
         while t >= w_end:
             flush_window(w_idx)
             w_idx += 1
@@ -110,13 +103,12 @@ def extract_windows_from_pcap(pcap_path):
             src_ports.clear()
             ts_list.clear()
 
-        # collect only UDP packets (expected)
         if UDP in pkt:
             pkt_sizes.append(len(pkt))
             src_ports.append(int(pkt[UDP].sport))
             ts_list.append(t)
 
-    # flush last window (the one containing last pkt)
+
     flush_window(w_idx)
 
     reader.close()
@@ -124,7 +116,6 @@ def extract_windows_from_pcap(pcap_path):
 
 def scenario_from_name(fname):
     base = os.path.basename(fname)
-    # expected: r3_s1_..., r3_s2_..., ...
     if base.startswith("r3_s1_"): return "s1"
     if base.startswith("r3_s2_"): return "s2"
     if base.startswith("r3_s3_"): return "s3"
@@ -134,7 +125,6 @@ def scenario_from_name(fname):
 
 def main():
     random.seed(SEED)
-
     pcaps = sorted(glob.glob("/root/datasets/benign_raw/r3_s*.pcap"))
     if not pcaps:
         print("[!] No r3_s*.pcap found in /root/datasets/benign_raw/")
@@ -145,7 +135,7 @@ def main():
     print("Benign r3 raw PCAP -> 0.5s windows -> 9 features -> scenario 2000 each")
     print("="*80)
 
-    # Extract windows per scenario
+
     scenario_rows = {f"s{i}": [] for i in range(1,6)}
 
     for p in pcaps:
@@ -154,23 +144,23 @@ def main():
         rows = extract_windows_from_pcap(p)
         print(f"    windows extracted: {len(rows)}")
 
-        # Add metadata
+
         for r in rows:
             r["scenario"] = scen
-            r["group_id"] = os.path.basename(p)  # for GroupKFold later (avoid leakage)
-            r["label"] = 0  # benign
+            r["group_id"] = os.path.basename(p)  
+            r["label"] = 0  
         if scen in scenario_rows:
             scenario_rows[scen].extend(rows)
         else:
             print(f"    [!] Unknown scenario name: {scen} (skipped)")
 
-    # Sample exactly 2000 per scenario
+
     final_rows = []
     for scen in ["s1","s2","s3","s4","s5"]:
         rows = scenario_rows[scen]
         if len(rows) < TARGET_PER_SCENARIO:
             print(f"[!] {scen}: only {len(rows)} windows < {TARGET_PER_SCENARIO}. (Need more capture)")
-            # still take all; better than failing hard
+
             chosen = rows
         else:
             chosen = random.sample(rows, TARGET_PER_SCENARIO)
@@ -180,7 +170,7 @@ def main():
 
     df = pd.DataFrame(final_rows)
 
-    # Stable column order
+
     cols = [
         "scenario", "group_id", "window_idx",
         "pkt_in", "byte_in", "avg_len", "std_len", "same_size_ratio",
